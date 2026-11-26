@@ -11,6 +11,17 @@ describe('OctoFit data contract', () => {
     expect(error?.errors.name).toBeDefined();
     expect(error?.errors.email).toBeDefined();
     expect(error?.errors.fitnessGoal).toBeDefined();
+
+    const invalid = new User({ name: '  ', email: 'not-an-email', fitnessGoal: ' ' });
+    const invalidError = invalid.validateSync();
+    expect(invalidError?.errors.name).toBeDefined();
+    expect(invalidError?.errors.email).toBeDefined();
+    expect(invalidError?.errors.fitnessGoal).toBeDefined();
+
+    const normalized = new User({ name: ' Mona ', email: 'MONA@example.com ', fitnessGoal: ' endurance ' });
+    expect(normalized.name).toBe('Mona');
+    expect(normalized.email).toBe('mona@example.com');
+    expect(normalized.fitnessGoal).toBe('endurance');
   });
   it('requires teams to have a name, mascot, and members array', () => {
     const team = new Team({ name: 'Octocats', mascot: 'Mona', members: [] });
@@ -24,6 +35,9 @@ describe('OctoFit data contract', () => {
     const missing = new Team({}).validateSync();
     expect(missing?.errors.name).toBeDefined();
     expect(missing?.errors.mascot).toBeDefined();
+    const whitespace = new Team({ name: ' ', mascot: '  ' }).validateSync();
+    expect(whitespace?.errors.name).toBeDefined();
+    expect(whitespace?.errors.mascot).toBeDefined();
   });
   it('requires activities to connect users, teams, types, minutes, points, and dates', () => {
     const activity = new Activity({});
@@ -34,6 +48,7 @@ describe('OctoFit data contract', () => {
     expect(error?.errors.minutes).toBeDefined();
     expect(error?.errors.points).toBeDefined();
     expect(error?.errors.occurredAt).toBeDefined();
+    expect(new Activity({ type: '  ' }).validateSync()?.errors.type).toBeDefined();
   });
   it('defines workout suggestions with focus, duration, and difficulty', () => {
     const workout = new Workout({ title: 'Intervals' });
@@ -41,6 +56,7 @@ describe('OctoFit data contract', () => {
     expect(error?.errors.focus).toBeDefined();
     expect(error?.errors.minutes).toBeDefined();
     expect(error?.errors.difficulty).toBeDefined();
+    expect(new Workout({ title: 'Intervals', focus: ' ', minutes: 30, difficulty: 'moderate' }).validateSync()?.errors.focus).toBeDefined();
   });
 
   it('seeds representative data for all four capabilities idempotently', async () => {
@@ -65,6 +81,7 @@ describe('OctoFit data contract', () => {
         fitnessGoal: 'endurance',
       });
       await Team.updateOne({ _id: previousTeam._id }, { $addToSet: { members: existingMona._id } });
+      await Team.updateOne({ _id: sentinelTeam._id }, { $addToSet: { members: existingMona._id } });
       const sentinelActivity = await Activity.create({
         user: sentinelUser._id,
         team: sentinelTeam._id,
@@ -102,13 +119,19 @@ describe('OctoFit data contract', () => {
       const seededMona = await User.findOne({ email: 'mona@example.com' });
       const seededTeam = await Team.findOne({ name: 'Octocats' });
       const retainedPreviousTeam = await Team.findById(previousTeam._id);
+      const retainedSentinelTeam = await Team.findById(sentinelTeam._id);
       expect(seededMona).toBeTruthy();
       expect(seededTeam).toBeTruthy();
       expect(retainedPreviousTeam).toBeTruthy();
-      if (!seededMona || !seededTeam || !seededMona.team || !retainedPreviousTeam) throw new Error('Seed did not create linked Octocats fixtures');
+      expect(retainedSentinelTeam).toBeTruthy();
+      if (!seededMona || !seededTeam || !seededMona.team || !retainedPreviousTeam || !retainedSentinelTeam) {
+        throw new Error('Seed did not create linked Octocats fixtures');
+      }
       expect(seededMona.team.toString()).toBe(seededTeam._id.toString());
       expect(seededTeam.members.map((member) => member.toString())).toContain(seededMona._id.toString());
       expect(retainedPreviousTeam.members.map((member) => member.toString())).not.toContain(seededMona._id.toString());
+      expect(retainedSentinelTeam.members.map((member) => member.toString())).not.toContain(seededMona._id.toString());
+      expect(retainedSentinelTeam.members.map((member) => member.toString())).toContain(sentinelUser._id.toString());
       expect(await Activity.exists({ user: seededMona._id, team: seededTeam._id, type: 'run' })).toBeTruthy();
       expect(await User.exists({ _id: sentinelUser._id })).toBeTruthy();
       expect(await Team.exists({ _id: sentinelTeam._id })).toBeTruthy();
