@@ -1,0 +1,396 @@
+[1mdiff --git a/docs/architecture.md b/docs/architecture.md[m
+[1mindex 1f1f40f..12aef35 100644[m
+[1m--- a/docs/architecture.md[m
+[1m+++ b/docs/architecture.md[m
+[36m@@ -30,20 +30,20 @@[m [mOctoFit Tracker is a three-tier application for a school fitness program. The st[m
+ [m
+ Record your plan here before editing code.[m
+ [m
+[31m-- Presentation tier decision:[m
+[31m-- Logic tier decision:[m
+[31m-- Data tier decision:[m
+[31m-- Activity tracking approach:[m
+[31m-- Team management approach:[m
+[31m-- Leaderboard approach:[m
+[31m-- Workout suggestions approach:[m
+[32m+[m[32m- Presentation tier decision: Use the shared API client through a small resource hook; each capability page will render accessible loading, error, empty, and success states.[m
+[32m+[m[32m- Logic tier decision: Keep request validation and capability behavior in explicit service functions behind the existing `/api` routes, returning deliberate 4xx responses for invalid or unknown resources.[m
+[32m+[m[32m- Data tier decision: Enforce required model fields with Mongoose validation and default team members to an empty array; keep the existing idempotent seed strategy.[m
+[32m+[m[32m- Activity tracking approach: Validate user/team IDs and their existence, store the referenced records, and calculate points from submitted minutes.[m
+[32m+[m[32m- Team management approach: Require a non-empty name and mascot, validate supplied member IDs, and default omitted members to an empty list.[m
+[32m+[m[32m- Leaderboard approach: Sum activity points by team, sort highest first, and assign 1-based ranks.[m
+[32m+[m[32m- Workout suggestions approach: Match a user's fitness goal first, then recent activity types, and explain each recommendation.[m
+ [m
+ ## Test plan[m
+ [m
+ Record the commands you run and what each failure means.[m
+ [m
+[31m-- Data-tier command: `npm run test:data --prefix octofit-tracker/backend`[m
+[31m-- API command: `npm run test:api --prefix octofit-tracker/backend`[m
+[31m-- Frontend command: `npm test --prefix octofit-tracker/frontend`[m
+[31m-- Backend build command: `npm run build --prefix octofit-tracker/backend`[m
+[31m-- Frontend build command: `npm run build --prefix octofit-tracker/frontend`[m
+[32m+[m[32m- Data-tier command: `npm run test:data --prefix octofit-tracker/backend` — passed (5 tests); failures indicate model or seed contract regressions.[m
+[32m+[m[32m- API command: `npm run test:api --prefix octofit-tracker/backend` — passed (4 tests); failures indicate endpoint validation or capability behavior regressions.[m
+[32m+[m[32m- Frontend command: `npm test --prefix octofit-tracker/frontend` — passed (15 tests); failures indicate data rendering or accessible loading, empty, and error state regressions.[m
+[32m+[m[32m- Backend build command: `npm run build --prefix octofit-tracker/backend` — passed; failures indicate backend TypeScript errors.[m
+[32m+[m[32m- Frontend build command: `npm run build --prefix octofit-tracker/frontend` — passed; failures indicate frontend type-check or production bundle errors.[m
+[1mdiff --git a/octofit-tracker/backend/src/models/Activity.ts b/octofit-tracker/backend/src/models/Activity.ts[m
+[1mindex aacfa12..25ae828 100644[m
+[1m--- a/octofit-tracker/backend/src/models/Activity.ts[m
+[1m+++ b/octofit-tracker/backend/src/models/Activity.ts[m
+[36m@@ -1,12 +1,12 @@[m
+ import { Schema, model } from 'mongoose';[m
+ [m
+ const activitySchema = new Schema({[m
+[31m-  user: { type: Schema.Types.ObjectId, ref: 'User' },[m
+[31m-  team: { type: Schema.Types.ObjectId, ref: 'Team' },[m
+[31m-  type: String,[m
+[31m-  minutes: Number,[m
+[31m-  points: Number,[m
+[31m-  occurredAt: Date,[m
+[32m+[m[32m  user: { type: Schema.Types.ObjectId, ref: 'User', required: true },[m
+[32m+[m[32m  team: { type: Schema.Types.ObjectId, ref: 'Team', required: true },[m
+[32m+[m[32m  type: { type: String, required: true },[m
+[32m+[m[32m  minutes: { type: Number, required: true, min: 1 },[m
+[32m+[m[32m  points: { type: Number, required: true, min: 0 },[m
+[32m+[m[32m  occurredAt: { type: Date, required: true },[m
+ });[m
+ [m
+ export const Activity = model('Activity', activitySchema);[m
+[1mdiff --git a/octofit-tracker/backend/src/models/Team.ts b/octofit-tracker/backend/src/models/Team.ts[m
+[1mindex fe0b536..b7295d8 100644[m
+[1m--- a/octofit-tracker/backend/src/models/Team.ts[m
+[1m+++ b/octofit-tracker/backend/src/models/Team.ts[m
+[36m@@ -1,9 +1,9 @@[m
+ import { Schema, model } from 'mongoose';[m
+ [m
+ const teamSchema = new Schema({[m
+[31m-  name: String,[m
+[31m-  mascot: String,[m
+[31m-  members: [{ type: Schema.Types.ObjectId, ref: 'User' }],[m
+[32m+[m[32m  name: { type: String, required: true },[m
+[32m+[m[32m  mascot: { type: String, required: true },[m
+[32m+[m[32m  members: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [] },[m
+ });[m
+ [m
+ export const Team = model('Team', teamSchema);[m
+[1mdiff --git a/octofit-tracker/backend/src/models/User.ts b/octofit-tracker/backend/src/models/User.ts[m
+[1mindex 91842e9..03eb3a9 100644[m
+[1m--- a/octofit-tracker/backend/src/models/User.ts[m
+[1m+++ b/octofit-tracker/backend/src/models/User.ts[m
+[36m@@ -1,10 +1,10 @@[m
+ import { Schema, model } from 'mongoose';[m
+ [m
+ const userSchema = new Schema({[m
+[31m-  name: String,[m
+[31m-  email: String,[m
+[32m+[m[32m  name: { type: String, required: true },[m
+[32m+[m[32m  email: { type: String, required: true },[m
+   team: { type: Schema.Types.ObjectId, ref: 'Team' },[m
+[31m-  fitnessGoal: String,[m
+[32m+[m[32m  fitnessGoal: { type: String, required: true },[m
+ });[m
+ [m
+ export const User = model('User', userSchema);[m
+[1mdiff --git a/octofit-tracker/backend/src/models/Workout.ts b/octofit-tracker/backend/src/models/Workout.ts[m
+[1mindex 60ef24e..27c3ae9 100644[m
+[1m--- a/octofit-tracker/backend/src/models/Workout.ts[m
+[1m+++ b/octofit-tracker/backend/src/models/Workout.ts[m
+[36m@@ -1,10 +1,10 @@[m
+ import { Schema, model } from 'mongoose';[m
+ [m
+ const workoutSchema = new Schema({[m
+[31m-  title: String,[m
+[31m-  focus: String,[m
+[31m-  minutes: Number,[m
+[31m-  difficulty: String,[m
+[32m+[m[32m  title: { type: String, required: true },[m
+[32m+[m[32m  focus: { type: String, required: true },[m
+[32m+[m[32m  minutes: { type: Number, required: true, min: 1 },[m
+[32m+[m[32m  difficulty: { type: String, required: true },[m
+ });[m
+ [m
+ export const Workout = model('Workout', workoutSchema);[m
+[1mdiff --git a/octofit-tracker/backend/src/services/octofitService.ts b/octofit-tracker/backend/src/services/octofitService.ts[m
+[1mindex 96f8fbf..c0929c0 100644[m
+[1m--- a/octofit-tracker/backend/src/services/octofitService.ts[m
+[1m+++ b/octofit-tracker/backend/src/services/octofitService.ts[m
+[36m@@ -1,27 +1,127 @@[m
+[32m+[m[32mimport mongoose from 'mongoose';[m
+ import { Activity, Team, User, Workout } from '../models/index.js';[m
+ [m
+[32m+[m[32mtype InputRecord = Record<string, unknown>;[m
+[32m+[m
+[32m+[m[32mfunction isInputRecord(input: unknown): input is InputRecord {[m
+[32m+[m[32m  return typeof input === 'object' && input !== null && !Array.isArray(input);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction requestError(message: string, status: number): Error & { status: number } {[m
+[32m+[m[32m  return Object.assign(new Error(message), { status });[m
+[32m+[m[32m}[m
+[32m+[m
+ export async function listActivities() {[m
+   return Activity.find().lean();[m
+ }[m
+ [m
+[31m-export async function createActivity(_input: unknown) {[m
+[31m-  throw Object.assign(new Error('Activity validation is not implemented yet'), { status: 501 });[m
+[32m+[m[32mexport async function createActivity(input: unknown) {[m
+[32m+[m[32m  if (!isInputRecord(input)) throw requestError('Activity details are required', 400);[m
+[32m+[m[32m  const { userId, teamId, type, minutes } = input;[m
+[32m+[m[32m  if (typeof userId !== 'string' || !mongoose.isValidObjectId(userId)) {[m
+[32m+[m[32m    throw requestError('A valid userId is required', 400);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if (typeof teamId !== 'string' || !mongoose.isValidObjectId(teamId)) {[m
+[32m+[m[32m    throw requestError('A valid teamId is required', 400);[m
+[32m+[m[32m  }[m
+[32m+[m[32m  if (typeof type !== 'string' || !type.trim()) throw requestError('An activity type is required', 400);[m
+[32m+[m[32m  if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes < 1) {[m
+[32m+[m[32m    throw requestError('Minutes must be a positive number', 400);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const [user, team] = await Promise.all([User.exists({ _id: userId }), Team.exists({ _id: teamId })]);[m
+[32m+[m[32m  if (!user) throw requestError('User not found', 404);[m
+[32m+[m[32m  if (!team) throw requestError('Team not found', 404);[m
+[32m+[m
+[32m+[m[32m  return Activity.create({[m
+[32m+[m[32m    user: userId,[m
+[32m+[m[32m    team: teamId,[m
+[32m+[m[32m    type,[m
+[32m+[m[32m    minutes,[m
+[32m+[m[32m    points: minutes,[m
+[32m+[m[32m    occurredAt: new Date(),[m
+[32m+[m[32m  });[m
+ }[m
+ [m
+ export async function listTeams() {[m
+   return Team.find().lean();[m
+ }[m
+ [m
+[31m-export async function createTeam(_input: unknown) {[m
+[31m-  throw Object.assign(new Error('Team validation is not implemented yet'), { status: 501 });[m
+[32m+[m[32mexport async function createTeam(input: unknown) {[m
+[32m+[m[32m  if (!isInputRecord(input)) throw requestError('Team details are required', 400);[m
+[32m+[m[32m  const { name, mascot } = input;[m
+[32m+[m[32m  const members = input.members === undefined ? [] : input.members;[m
+[32m+[m[32m  if (typeof name !== 'string' || !name.trim()) throw requestError('A team name is required', 400);[m
+[32m+[m[32m  if (typeof mascot !== 'string' || !mascot.trim()) throw requestError('A team mascot is required', 400);[m
+[32m+[m[32m  if (!Array.isArray(members)) throw requestError('Members must be valid user IDs', 400);[m
+[32m+[m
+[32m+[m[32m  const memberIds: string[] = [];[m
+[32m+[m[32m  for (const member of members) {[m
+[32m+[m[32m    if (typeof member !== 'string' || !mongoose.isValidObjectId(member)) {[m
+[32m+[m[32m      throw requestError('Members must be valid user IDs', 400);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    memberIds.push(member);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const uniqueMemberIds = [...new Set(memberIds)];[m
+[32m+[m[32m  if (uniqueMemberIds.length > 0) {[m
+[32m+[m[32m    const existingMembers = await User.countDocuments({ _id: { $in: uniqueMemberIds } });[m
+[32m+[m[32m    if (existingMembers !== uniqueMemberIds.length) throw requestError('One or more team members were not found', 404);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return Team.create({ name, mascot, members: uniqueMemberIds });[m
+ }[m
+ [m
+ export async function getLeaderboard() {[m
+[31m-  return [];[m
+[32m+[m[32m  const [teams, activities] = await Promise.all([[m
+[32m+[m[32m    Team.find().select('name').lean(),[m
+[32m+[m[32m    Activity.find().select('team points').lean(),[m
+[32m+[m[32m  ]);[m
+[32m+[m[32m  const pointsByTeam = new Map<string, number>();[m
+[32m+[m[32m  for (const activity of activities) {[m
+[32m+[m[32m    const teamId = activity.team.toString();[m
+[32m+[m[32m    pointsByTeam.set(teamId, (pointsByTeam.get(teamId) ?? 0) + activity.points);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return teams[m
+[32m+[m[32m    .map((team) => ({[m
+[32m+[m[32m      teamName: team.name,[m
+[32m+[m[32m      totalPoints: pointsByTeam.get(team._id.toString()) ?? 0,[m
+[32m+[m[32m    }))[m
+[32m+[m[32m    .sort((left, right) => right.totalPoints - left.totalPoints || left.teamName.localeCompare(right.teamName))[m
+[32m+[m[32m    .map((team, index) => ({ ...team, rank: index + 1 }));[m
+ }[m
+ [m
+[31m-export async function suggestWorkouts(_userEmail: string) {[m
+[31m-  return Workout.find().limit(1).lean();[m
+[32m+[m[32mexport async function suggestWorkouts(userEmail: string) {[m
+[32m+[m[32m  const user = await User.findOne({ email: userEmail }).lean();[m
+[32m+[m[32m  if (!user) throw requestError('User not found', 404);[m
+[32m+[m
+[32m+[m[32m  const [activities, workouts] = await Promise.all([[m
+[32m+[m[32m    Activity.find({ user: user._id }).select('type occurredAt').sort({ occurredAt: -1 }).limit(5).lean(),[m
+[32m+[m[32m    Workout.find().lean(),[m
+[32m+[m[32m  ]);[m
+[32m+[m[32m  const goal = user.fitnessGoal?.trim().toLowerCase();[m
+[32m+[m[32m  const activityTypes = activities.map((activity) => activity.type.trim().toLowerCase());[m
+[32m+[m
+[32m+[m[32m  return workouts[m
+[32m+[m[32m    .map((workout) => {[m
+[32m+[m[32m      const focus = workout.focus.trim().toLowerCase();[m
+[32m+[m[32m      const activityIndex = activityTypes.indexOf(focus);[m
+[32m+[m[32m      if (goal && focus === goal) {[m
+[32m+[m[32m        return { ...workout, reason: `Recommended because it matches your ${user.fitnessGoal} fitness goal.`, priority: 100 };[m
+[32m+[m[32m      }[m
+[32m+[m[32m      if (activityIndex !== -1) {[m
+[32m+[m[32m        return {[m
+[32m+[m[32m          ...workout,[m
+[32m+[m[32m          reason: `Recommended based on your recent ${activities[activityIndex].type} activity.`,[m
+[32m+[m[32m          priority: 10 - activityIndex,[m
+[32m+[m[32m        };[m
+[32m+[m[32m      }[m
+[32m+[m[32m      return null;[m
+[32m+[m[32m    })[m
+[32m+[m[32m    .filter((workout): workout is NonNullable<typeof workout> => workout !== null)[m
+[32m+[m[32m    .sort((left, right) => right.priority - left.priority)[m
+[32m+[m[32m    .map(({ priority: _priority, ...workout }) => workout);[m
+ }[m
+ [m
+ export { User };[m
+[1mdiff --git a/octofit-tracker/frontend/src/components/Activities.tsx b/octofit-tracker/frontend/src/components/Activities.tsx[m
+[1mindex c1b9943..a712ec6 100644[m
+[1m--- a/octofit-tracker/frontend/src/components/Activities.tsx[m
+[1m+++ b/octofit-tracker/frontend/src/components/Activities.tsx[m
+[36m@@ -1,4 +1,29 @@[m
+[31m-import { CapabilityCard } from './CapabilityCard.js';[m
+[32m+[m[32mimport { useApiResource } from '../hooks/useApiResource.js';[m
+[32m+[m
+[32m+[m[32mtype Activity = { _id?: string; type: string; minutes: number; points: number };[m
+[32m+[m[32mtype ActivitiesResponse = { activities: Activity[] };[m
+[32m+[m
+ export default function Activities() {[m
+[31m-  return <CapabilityCard title="Activities" description="Track student activity minutes and points." />;[m
+[32m+[m[32m  const { data, error, loading } = useApiResource<ActivitiesResponse>('/api/activities');[m
+[32m+[m
+[32m+[m[32m  return ([m
+[32m+[m[32m    <section className="card">[m
+[32m+[m[32m      <div className="card-body">[m
+[32m+[m[32m        <h2 className="h4">Activities</h2>[m
+[32m+[m[32m        <p>Track student activity minutes and points.</p>[m
+[32m+[m[32m        {loading && <p role="status">Loading activities...</p>}[m
+[32m+[m[32m        {error && <p role="alert">Unable to load activities: {error}</p>}[m
+[32m+[m[32m        {data?.activities.length === 0 && <p>No activities yet.</p>}[m
+[32m+[m[32m        {data && data.activities.length > 0 && ([m
+[32m+[m[32m          <ul>[m
+[32m+[m[32m            {data.activities.map((activity, index) => ([m
+[32m+[m[32m              <li key={activity._id ?? `${activity.type}-${activity.minutes}-${index}`}>[m
+[32m+[m[32m                {activity.type}: {activity.minutes} minutes, {activity.points} points[m
+[32m+[m[32m              </li>[m
+[32m+[m[32m            ))}[m
+[32m+[m[32m          </ul>[m
+[32m+[m[32m        )}[m
+[32m+[m[32m      </div>[m
+[32m+[m[32m    </section>[m
+[32m+[m[32m  );[m
+ }[m
+[1mdiff --git a/octofit-tracker/frontend/src/components/Leaderboard.tsx b/octofit-tracker/frontend/src/components/Leaderboard.tsx[m
+[1mindex ee44032..f849b50 100644[m
+[1m--- a/octofit-tracker/frontend/src/components/Leaderboard.tsx[m
+[1m+++ b/octofit-tracker/frontend/src/components/Leaderboard.tsx[m
+[36m@@ -1,4 +1,27 @@[m
+[31m-import { CapabilityCard } from './CapabilityCard.js';[m
+[32m+[m[32mimport { useApiResource } from '../hooks/useApiResource.js';[m
+[32m+[m
+[32m+[m[32mtype LeaderboardEntry = { teamName: string; totalPoints: number; rank: number };[m
+[32m+[m[32mtype LeaderboardResponse = { leaderboard: LeaderboardEntry[] };[m
+[32m+[m
+ export default function Leaderboard() {[m
+[31m-  return <CapabilityCard title="Leaderboard" description="Compare team point totals." />;[m
+[32m+[m[32m  const { data, error, loading } = useApiResource<LeaderboardResponse>('/api/leaderboard');[m
+[32m+[m
+[32m+[m[32m  return ([m
+[32m+[m[32m    <section className="card">[m
+[32m+[m[32m      <div className="card-body">[m
+[32m+[m[32m        <h2 className="h4">Leaderboard</h2>[m
+[32m+[m[32m        <p>Compare team point totals.</p>[m
+[32m+[m[32m        {loading && <p role="status">Loading leaderboard...</p>}[m
+[32m+[m[32m        {error && <p role="alert">Unable to load leaderboard: {error}</p>}[m
+[32m+[m[32m        {data?.leaderboard.length === 0 && <p>No leaderboard rankings yet.</p>}[m
+[32m+[m[32m        {data && data.leaderboard.length > 0 && ([m
+[32m+[m[32m          <ol>[m
+[32m+[m[32m            {data.leaderboard.map((entry) => ([m
+[32m+[m[32m              <li key={`${entry.rank}-${entry.teamName}`}>{entry.teamName}: {entry.totalPoints} points</li>[m
+[32m+[m[32m            ))}[m
+[32m+[m[32m          </ol>[m
+[32m+[m[32m        )}[m
+[32m+[m[32m      </div>[m
+[32m+[m[32m    </section>[m
+[32m+[m[32m  );[m
+ }[m
+[1mdiff --git a/octofit-tracker/frontend/src/components/Teams.tsx b/octofit-tracker/frontend/src/components/Teams.tsx[m
+[1mindex 801b90b..b185516 100644[m
+[1m--- a/octofit-tracker/frontend/src/components/Teams.tsx[m
+[1m+++ b/octofit-tracker/frontend/src/components/Teams.tsx[m
+[36m@@ -1,4 +1,27 @@[m
+[31m-import { CapabilityCard } from './CapabilityCard.js';[m
+[32m+[m[32mimport { useApiResource } from '../hooks/useApiResource.js';[m
+[32m+[m
+[32m+[m[32mtype Team = { _id?: string; name: string; mascot: string; members: string[] };[m
+[32m+[m[32mtype TeamsResponse = { teams: Team[] };[m
+[32m+[m
+ export default function Teams() {[m
+[31m-  return <CapabilityCard title="Teams" description="Manage teams and members." />;[m
+[32m+[m[32m  const { data, error, loading } = useApiResource<TeamsResponse>('/api/teams');[m
+[32m+[m
+[32m+[m[32m  return ([m
+[32m+[m[32m    <section className="card">[m
+[32m+[m[32m      <div className="card-body">[m
+[32m+[m[32m        <h2 className="h4">Teams</h2>[m
+[32m+[m[32m        <p>Manage teams and members.</p>[m
+[32m+[m[32m        {loading && <p role="status">Loading teams...</p>}[m
+[32m+[m[32m        {error && <p role="alert">Unable to load teams: {error}</p>}[m
+[32m+[m[32m        {data?.teams.length === 0 && <p>No teams yet.</p>}[m
+[32m+[m[32m        {data && data.teams.length > 0 && ([m
+[32m+[m[32m          <ul>[m
+[32m+[m[32m            {data.teams.map((team, index) => ([m
+[32m+[m[32m              <li key={team._id ?? `${team.name}-${index}`}>{team.name} - {team.mascot}</li>[m
+[32m+[m[32m            ))}[m
+[32m+[m[32m          </ul>[m
+[32m+[m[32m        )}[m
+[32m+[m[32m      </div>[m
+[32m+[m[32m    </section>[m
+[32m+[m[32m  );[m
+ }[m
+[1mdiff --git a/octofit-tracker/frontend/src/components/Workouts.tsx b/octofit-tracker/frontend/src/components/Workouts.tsx[m
+[1mindex e51b485..814b645 100644[m
+[1m--- a/octofit-tracker/frontend/src/components/Workouts.tsx[m
+[1m+++ b/octofit-tracker/frontend/src/components/Workouts.tsx[m
+[36m@@ -1,4 +1,32 @@[m
+[31m-import { CapabilityCard } from './CapabilityCard.js';[m
+[32m+[m[32mimport { useApiResource } from '../hooks/useApiResource.js';[m
+[32m+[m
+[32m+[m[32mtype WorkoutSuggestion = { _id?: string; title: string; focus: string; minutes: number; difficulty: string; reason: string };[m
+[32m+[m[32mtype WorkoutsResponse = { suggestions: WorkoutSuggestion[] };[m
+[32m+[m[32mconst userEmail = 'mona@example.com';[m
+[32m+[m
+ export default function Workouts() {[m
+[31m-  return <CapabilityCard title="Workout suggestions" description="Recommend workouts from activity patterns." />;[m
+[32m+[m[32m  const path = `/api/workouts/suggestions/${encodeURIComponent(userEmail)}`;[m
+[32m+[m[32m  const { data, error, loading } = useApiResource<WorkoutsResponse>(path);[m
+[32m+[m
+[32m+[m[32m  return ([m
+[32m+[m[32m    <section className="card">[m
+[32m+[m[32m      <div className="card-body">[m
+[32m+[m[32m        <h2 className="h4">Workout suggestions</h2>[m
+[32m+[m[32m        <p>Recommend workouts from activity patterns.</p>[m
+[32m+[m[32m        {loading && <p role="status">Loading workout suggestions...</p>}[m
+[32m+[m[32m        {error && <p role="alert">Unable to load workout suggestions: {error}</p>}[m
+[32m+[m[32m        {data?.suggestions.length === 0 && <p>No workout suggestions yet.</p>}[m
+[32m+[m[32m        {data && data.suggestions.length > 0 && ([m
+[32m+[m[32m          <ul>[m
+[32m+[m[32m            {data.suggestions.map((suggestion, index) => ([m
+[32m+[m[32m              <li key={suggestion._id ?? `${suggestion.title}-${index}`}>[m
+[32m+[m[32m                <strong>{suggestion.title}</strong> - {suggestion.focus}, {suggestion.minutes} minutes ({suggestion.difficulty}).[m
+[32m+[m[32m                <p>{suggestion.reason}</p>[m
+[32m+[m[32m              </li>[m
+[32m+[m[32m            ))}[m
+[32m+[m[32m          </ul>[m
+[32m+[m[32m        )}[m
+[32m+[m[32m      </div>[m
+[32m+[m[32m    </section>[m
+[32m+[m[32m  );[m
+ }[m
